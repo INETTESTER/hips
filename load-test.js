@@ -1,11 +1,8 @@
-// load-test.js — HLS streaming load test สำหรับ hips-stream.com
-// จำลอง player: ดึง m3u8 → parse segments → ดาวน์โหลด .ts → วน refresh playlist
-
 import http from "k6/http";
 import { sleep, check } from "k6";
 import { Counter, Trend, Rate } from "k6/metrics";
 import exec from "k6/execution";
-import { htmlReport } from "https://raw.githubusercontent.com/benc-uk/k6-reporter/main/dist/bundle.js";
+import { htmlReport } from "https://raw.githubusercontent.com/benc-uk/k6-reporter/2.4.0/dist/bundle.js";
 import { textSummary } from "https://jslib.k6.io/k6-summary/0.0.1/index.js";
 
 const PLAYLIST_URL =
@@ -18,28 +15,6 @@ const VIEWER_PROFILES = {
   "500": { maxUsers: 500, rampUp: "40s", hold: "3m", rampDown: "20s", watchSeconds: 120 },
   "1000": { maxUsers: 1000, rampUp: "60s", hold: "5m", rampDown: "30s", watchSeconds: 180 },
 };
-const MAX_USERS_ENV = parsePositiveInt(__ENV.MAX_USERS);
-const PRESET_PROFILE = VIEWER_PROFILES[VIEWER_PRESET];
-const CUSTOM_MAX_USERS = MAX_USERS_ENV ?? parsePositiveInt(VIEWER_PRESET);
-const IS_STANDARD_PRESET = Boolean(PRESET_PROFILE) && CUSTOM_MAX_USERS === null;
-const VIEWER_PROFILE = PRESET_PROFILE || buildCustomProfile(CUSTOM_MAX_USERS ?? 100);
-const MAX_USERS = CUSTOM_MAX_USERS ?? VIEWER_PROFILE.maxUsers;
-const RAMP_UP = __ENV.RAMP_UP || VIEWER_PROFILE.rampUp;
-const HOLD = __ENV.HOLD || VIEWER_PROFILE.hold;
-const RAMP_DOWN = __ENV.RAMP_DOWN || VIEWER_PROFILE.rampDown;
-const WATCH_SECONDS = Number(__ENV.WATCH_SECONDS || VIEWER_PROFILE.watchSeconds);
-const VIEWER_LABEL = IS_STANDARD_PRESET ? `preset:${VIEWER_PRESET}` : `custom:${MAX_USERS}`;
-const HLS_VARIANT = String(__ENV.HLS_VARIANT || "lowest").trim().toLowerCase();
-const INITIAL_SEGMENTS = parsePositiveInt(__ENV.INITIAL_SEGMENTS) ?? 1;
-
-const errors401 = new Counter("errors_401_total");
-const errors4xx = new Counter("errors_4xx_total");
-const errors5xx = new Counter("errors_5xx_total");
-const playlistDuration = new Trend("playlist_load_ms", true);
-const segmentDuration = new Trend("segment_load_ms", true);
-const segmentBytes = new Counter("segment_bytes_total");
-const segmentsDownloaded = new Counter("segments_downloaded_total");
-const playbackSuccess = new Rate("playback_success_rate");
 
 function parsePositiveInt(value) {
   const n = Number.parseInt(value, 10);
@@ -56,6 +31,33 @@ function buildCustomProfile(maxUsers) {
     watchSeconds: safeUsers <= 100 ? 60 : safeUsers <= 250 ? 90 : safeUsers <= 500 ? 120 : safeUsers <= 1000 ? 180 : 150,
   };
 }
+
+const MAX_USERS_ENV = parsePositiveInt(__ENV.MAX_USERS);
+const PRESET_PROFILE = VIEWER_PROFILES[VIEWER_PRESET];
+const CUSTOM_MAX_USERS =
+  MAX_USERS_ENV !== null ? MAX_USERS_ENV : parsePositiveInt(VIEWER_PRESET);
+const IS_STANDARD_PRESET = Boolean(PRESET_PROFILE) && MAX_USERS_ENV === null;
+const VIEWER_PROFILE =
+  PRESET_PROFILE || buildCustomProfile(CUSTOM_MAX_USERS !== null ? CUSTOM_MAX_USERS : 100);
+const MAX_USERS = CUSTOM_MAX_USERS !== null ? CUSTOM_MAX_USERS : VIEWER_PROFILE.maxUsers;
+const RAMP_UP = __ENV.RAMP_UP || VIEWER_PROFILE.rampUp;
+const HOLD = __ENV.HOLD || VIEWER_PROFILE.hold;
+const RAMP_DOWN = __ENV.RAMP_DOWN || VIEWER_PROFILE.rampDown;
+const WATCH_SECONDS = Number(__ENV.WATCH_SECONDS || VIEWER_PROFILE.watchSeconds);
+const VIEWER_LABEL = IS_STANDARD_PRESET ? `preset:${VIEWER_PRESET}` : `custom:${MAX_USERS}`;
+const HLS_VARIANT = String(__ENV.HLS_VARIANT || "lowest").trim().toLowerCase();
+
+const rawInitialSegments = parsePositiveInt(__ENV.INITIAL_SEGMENTS);
+const INITIAL_SEGMENTS = rawInitialSegments !== null ? rawInitialSegments : 1;
+
+const errors401 = new Counter("errors_401_total");
+const errors4xx = new Counter("errors_4xx_total");
+const errors5xx = new Counter("errors_5xx_total");
+const playlistDuration = new Trend("playlist_load_ms", true);
+const segmentDuration = new Trend("segment_load_ms", true);
+const segmentBytes = new Counter("segment_bytes_total");
+const segmentsDownloaded = new Counter("segments_downloaded_total");
+const playbackSuccess = new Rate("playback_success_rate");
 
 export const options = {
   scenarios: {
